@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: awash-edir-db
+    environment:
+      POSTGRES_DB: awash_edir
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: your_secure_password_here
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awash-edir-backend
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: awash_edir
+      DB_USER: postgres
+      DB_PASSWORD: your_secure_password_here
+      JWT_SECRET: your-super-secret-jwt-key-change-this
+      JWT_REFRESH_SECRET: your-refresh-secret-key-change-this
+      FRONTEND_URL: http://localhost:3025
+    ports:
+      - "3025:3025"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

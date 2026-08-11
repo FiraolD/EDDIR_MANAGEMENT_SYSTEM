@@ -1,0 +1,21 @@
+:root {
+  --primary: #000080 !important;
+  --primary-foreground: #ffffff !important;
+  --secondary: #020617 !important;
+  --secondary-foreground: #ffffff !important;
+  --ring: #000080 !important;
+  --chart-1: #000080 !important;
+  --chart-2: #020617 !important;
+  --radius: 0.75rem !important;
+}
+
+.dark {
+  --primary: #1e3a8a !important;
+  --ring: #1e3a8a !important;
+}
+
+.glass {
+  background-color: rgba(var(--background), 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}

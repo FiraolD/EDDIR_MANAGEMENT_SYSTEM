@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "@types/multer": "^2.2.0"
+  },
+  "dependencies": {
+    "multer": "^2.2.0"
+  }
+}

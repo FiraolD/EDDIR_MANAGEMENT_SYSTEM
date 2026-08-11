@@ -96,7 +96,11 @@ export const Claims: React.FC = () => {
         params.organization_id = selectedOrganizationId;
       }
       const response = await claimsAPI.getAll(params);
-      setClaims(response.data.claims || []);
+      const claims = (response.data.claims || []).map((claim: any) => ({
+        ...claim,
+        status: claim.status || claim.claim_status,
+      }));
+      setClaims(claims);
       setStats(response.data.stats || { total: 0, pending: 0, in_payout: 0, paid_this_month: 0 });
       setPagination(response.data.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 });
     } catch (error: any) {

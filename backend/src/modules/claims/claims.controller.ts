@@ -25,7 +25,7 @@ export const getClaims = async (req: AuthRequest, res: Response) => {
             SELECT 
                 c.id, c.claim_number, c.deceased_name, c.relationship,
                 c.date_of_death, c.date_reported, c.amount,
-                c.status AS claim_status, c.priority,
+                c.status AS status, c.priority,
                 c.documents, c.approved_by, c.approved_at, c.paid_at,
                 c.notes, c.created_at, c.updated_at,
                 m.id AS member_id, m.member_number, m.full_name AS member_name

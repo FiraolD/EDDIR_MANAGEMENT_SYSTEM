@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../../middleware/auth");
+const contributions_controller_1 = require("./contributions.controller");
+const router = (0, express_1.Router)();
+router.get('/', auth_1.authenticate, (0, auth_1.authorize)('admin', 'org_admin', 'edir_leader'), contributions_controller_1.getContributions);
+router.get('/stats', auth_1.authenticate, (0, auth_1.authorize)('admin', 'org_admin', 'leader'), contributions_controller_1.getContributionStats);
+router.get('/export', auth_1.authenticate, (0, auth_1.authorize)('admin', 'org_admin', 'leader'), contributions_controller_1.exportContributions);
+router.get('/:id', auth_1.authenticate, contributions_controller_1.getContributionById);
+router.post('/', auth_1.authenticate, (0, auth_1.authorize)('admin', 'org_admin', 'leader'), contributions_controller_1.createContribution);
+router.put('/:id', auth_1.authenticate, (0, auth_1.authorize)('admin', 'org_admin', 'leader'), contributions_controller_1.updateContribution);
+router.delete('/:id', auth_1.authenticate, (0, auth_1.authorize)('admin', 'org_admin'), contributions_controller_1.deleteContribution);
+router.post('/reconcile', auth_1.authenticate, (0, auth_1.authorize)('finance', 'super_admin'), contributions_controller_1.reconcileContributions);
+exports.default = router;

@@ -1,31 +1,42 @@
-import { query } from '../../config/database';
-import { claimQueries } from './claims.queries';
+import { getClient } from '../../config/database';
 
 export class ClaimsService {
   async createClaim(data: any, userId: string) {
-    const client = await pool.connect();
+    const client = await getClient();
     try {
       await client.query('BEGIN');
 
-      // Generate claim number
       const claimNumber = `CLM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      
-      // Insert claim
-      const result = await client.query(claimQueries.create, [
-        data.memberId, claimNumber, data.deceasedName, 
-        data.relationship, data.dateOfDeath, data.amount, userId
-      ]);
-      
+
+      const result = await client.query(
+        `INSERT INTO claims (
+            member_id, organization_id, claim_number,
+            deceased_name, relationship, date_of_death,
+            amount, notes, status, documents, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'reported'::claim_status, $9, NOW(), NOW()) RETURNING *`,
+        [
+          data.member_id,
+          data.organization_id || null,
+          claimNumber,
+          data.deceased_name,
+          data.relationship,
+          data.date_of_death,
+          data.amount,
+          data.notes || null,
+          data.documents || []
+        ]
+      );
+
       const claimId = result.rows[0].id;
-      
-      // Log workflow
-      await client.query(claimQueries.logWorkflow, [
-        claimId, 'reported', 'reported', userId, 'Claim reported by member'
-      ]);
-      
+
+      await client.query(
+        `INSERT INTO claim_workflow (claim_id, from_status, to_status, changed_by, comments, created_at)
+         VALUES ($1, NULL, 'reported'::claim_status, $2, $3, NOW())`,
+        [claimId, userId, 'Claim reported']
+      );
+
       await client.query('COMMIT');
-      
-      return { id: claimId, claimNumber };
+      return result.rows[0];
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -35,50 +46,53 @@ export class ClaimsService {
   }
 
   async advanceClaim(claimId: string, userId: string) {
-    const client = await pool.connect();
+    const client = await getClient();
     try {
       await client.query('BEGIN');
-      
-      // Get current status
-      const current = await client.query(
-        'SELECT status FROM claims WHERE id = $1',
-        [claimId]
-      );
-      
+
+      const currentRes = await client.query('SELECT status, amount, member_id, organization_id FROM claims WHERE id = $1', [claimId]);
+      if (currentRes.rows.length === 0) throw new Error('Claim not found');
+      const currentStatus = currentRes.rows[0].status;
+
       const statusFlow: Record<string, string> = {
-  reported: 'leader_approved',
-  leader_approved: 'admin_approved',
-  admin_approved: 'processing',
-  processing: 'paid'
-};
-      const nextStatus = statusFlow[current.rows[0].status];
-      
-      if (!nextStatus) {
-        throw new Error('Claim cannot be advanced further');
-      }
-      
-      // Update claim
-      await client.query(claimQueries.updateStatus, [
-        claimId, nextStatus, userId, nextStatus === 'paid' ? 'NOW()' : null
-      ]);
-      
-      // Log workflow
-      await client.query(claimQueries.logWorkflow, [
-        claimId, current.rows[0].status, nextStatus, userId, 'Status advanced'
-      ]);
-      
-      // If paid, create transaction record
+        reported: 'leader_approved',
+        leader_approved: 'admin_approved',
+        admin_approved: 'processing',
+        processing: 'paid',
+      };
+
+      const nextStatus = statusFlow[currentStatus];
+      if (!nextStatus) throw new Error('Claim cannot be advanced further');
+
+      const updateRes = await client.query(
+        `UPDATE claims SET
+           status = $1::claim_status,
+           approved_by = CASE WHEN $1::claim_status IN ('leader_approved','admin_approved') THEN $2 ELSE approved_by END,
+           approved_at = CASE WHEN $1::claim_status IN ('leader_approved','admin_approved') THEN NOW() ELSE approved_at END,
+           paid_at = CASE WHEN $1::claim_status = 'paid' THEN NOW() ELSE paid_at END,
+           updated_at = NOW()
+         WHERE id = $3 RETURNING *`,
+        [nextStatus, userId, claimId]
+      );
+
+      await client.query(
+        `INSERT INTO claim_workflow (claim_id, from_status, to_status, changed_by, comments, created_at)
+         VALUES ($1, $2::claim_status, $3::claim_status, $4, $5, NOW())`,
+        [claimId, currentStatus, nextStatus, userId, `Advanced from ${currentStatus} to ${nextStatus}`]
+      );
+
       if (nextStatus === 'paid') {
-        const claim = await client.query('SELECT amount, member_id FROM claims WHERE id = $1', [claimId]);
-        await client.query(`
-          INSERT INTO transactions (transaction_number, type, category, amount, member_id, claim_id, description)
-          VALUES ($1, 'debit', 'claim_payout', $2, $3, $4, 'Death benefit payout')
-        `, [`PAY-${Date.now()}`, claim.rows[0].amount, claim.rows[0].member_id, claimId]);
+        const claim = currentRes.rows[0];
+        const transactionNumber = `PAY-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+        await client.query(
+          `INSERT INTO transactions (transaction_number, type, category, amount, member_id, claim_id, description, organization_id, created_at)
+           VALUES ($1, 'debit', 'claim_payout', $2, $3, $4, 'Death benefit payout', $5, NOW())`,
+          [transactionNumber, claim.amount, claim.member_id, claimId, claim.organization_id]
+        );
       }
-      
+
       await client.query('COMMIT');
-      
-      return { claimId, status: nextStatus };
+      return updateRes.rows[0];
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

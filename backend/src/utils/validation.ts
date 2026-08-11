@@ -16,12 +16,12 @@ export const isValidPhone = (phone: string): boolean => {
 
 // Password validation (min 6 characters)
 export const isValidPassword = (password: string): boolean => {
-  return password && password.length >= 6;
+  return typeof password === 'string' && password.length >= 6;
 };
 
 // Amount validation (positive number)
 export const isValidAmount = (amount: number): boolean => {
-  return amount && amount > 0 && !isNaN(amount);
+  return typeof amount === 'number' && amount > 0 && !isNaN(amount);
 };
 
 // Date validation (YYYY-MM-DD)

@@ -25,6 +25,7 @@ import userRoutes from './modules/users/users.routes';
 
 
 const app = express();
+app.disable('x-powered-by');
 
 // CORS configuration - FIXED
 const allowedOrigins = [
@@ -47,11 +48,11 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+    if (allowedOrigins.indexOf(origin) !== -1 || env.nodeEnv === 'development') {
       callback(null, true);
     } else {
       console.warn('CORS blocked origin:', origin);
-      callback(null, true); // Allow in development
+      callback(new Error('Origin not allowed by CORS'));
     }
   },
   credentials: true,
@@ -70,8 +71,8 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 app.use(compression());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(logger);
 
 // Rate limiting

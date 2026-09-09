@@ -24,6 +24,7 @@ const transactions_routes_1 = __importDefault(require("./modules/transactions/tr
 const organizations_routes_1 = __importDefault(require("./modules/organizations/organizations.routes"));
 const users_routes_1 = __importDefault(require("./modules/users/users.routes"));
 const app = (0, express_1.default)();
+app.disable('x-powered-by');
 // CORS configuration - FIXED
 const allowedOrigins = [
     'http://localhost:3025',
@@ -43,12 +44,12 @@ app.use((0, cors_1.default)({
         // Allow requests with no origin (like mobile apps or curl)
         if (!origin)
             return callback(null, true);
-        if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+        if (allowedOrigins.indexOf(origin) !== -1 || env_1.env.nodeEnv === 'development') {
             callback(null, true);
         }
         else {
             console.warn('CORS blocked origin:', origin);
-            callback(null, true); // Allow in development
+            callback(new Error('Origin not allowed by CORS'));
         }
     },
     credentials: true,
@@ -65,8 +66,8 @@ app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 app.use((0, compression_1.default)());
-app.use(express_1.default.json());
-app.use(express_1.default.urlencoded({ extended: true }));
+app.use(express_1.default.json({ limit: '1mb' }));
+app.use(express_1.default.urlencoded({ extended: false, limit: '1mb' }));
 app.use(logger_1.logger);
 // Rate limiting
 app.use('/api/', rateLimit_1.apiLimiter);

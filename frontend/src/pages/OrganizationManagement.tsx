@@ -76,6 +76,7 @@ interface Member {
   id: string;
   member_number: string;
   full_name: string;
+  role: string;
   email: string;
   phone: string;
   status: string;
@@ -86,7 +87,7 @@ interface Member {
 
 export const OrganizationManagement: React.FC = () => {
   const { t } = useAppContext();
-  const { can, userRole } = usePermissions();
+  const { hasPermission, userRole } = usePermissions();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrgMembers, setSelectedOrgMembers] = useState<Member[]>([]);
   const [existingUsers, setExistingUsers] = useState<Member[]>([]);
@@ -184,7 +185,7 @@ export const OrganizationManagement: React.FC = () => {
   };
 
   useEffect(() => {
-    if (can('organization', 'read')) {
+    if (hasPermission('read')){
       fetchOrganizations();
       if (userRole === 'super_admin') {
         fetchUsers();
@@ -305,7 +306,7 @@ export const OrganizationManagement: React.FC = () => {
       .slice(0, 2);
   };
 
-  if (!can('organization', 'read')) {
+  if (!hasPermission('organization.read')) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
@@ -325,7 +326,7 @@ export const OrganizationManagement: React.FC = () => {
           <h2 className="text-3xl font-black tracking-tight text-foreground">Organization Management</h2>
           <p className="text-muted-foreground font-medium">Manage all Edir organizations, members, and leaders.</p>
         </div>
-        {can('organization', 'create') && (
+       {hasPermission('create') && (
           <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
             <DialogTrigger asChild>
               <Button className="rounded-2xl font-black shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90">
@@ -483,7 +484,7 @@ export const OrganizationManagement: React.FC = () => {
                   <Building className="w-16 h-16 text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold">No organizations found</h3>
                   <p className="text-sm text-muted-foreground">Get started by creating your first organization.</p>
-                  {can('organization', 'create') && (
+                 {hasPermission('create') && (
                     <Button 
                       variant="outline" 
                       className="mt-4 rounded-xl"

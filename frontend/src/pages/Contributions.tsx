@@ -3,6 +3,7 @@ import {
   Plus, 
   Search, 
   ArrowUpRight, 
+  Filter,
   CheckCircle2,
   Clock,
   TrendingUp,
@@ -43,19 +44,18 @@ interface Contribution {
   status: string;
   contribution_date: string;
   notes: string;
+  recorded_by: string;
 }
 
 export const Contributions: React.FC = () => {
-  const { t, selectedOrganizationId } = useAppContext();
-  const { userRole } = usePermissions();
+  const { t, user } = useAppContext();
+  const { hasPermission, isOrgAdmin, isSuperAdmin, isFinance } = usePermissions();
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
-  const [reconcileData, setReconcileData] = useState<any>(null);
   const [stats, setStats] = useState({
     total: 0,
     this_month: 0,
@@ -76,16 +76,12 @@ export const Contributions: React.FC = () => {
   const fetchContributions = async () => {
     setLoading(true);
     try {
-      const params: any = {
+      const response = await contributionsAPI.getAll({
         page: pagination.page,
         limit: pagination.limit,
         search: searchTerm || undefined,
         status: statusFilter || undefined,
-      };
-      if (selectedOrganizationId && userRole === 'super_admin') {
-        params.organization_id = selectedOrganizationId;
-      }
-      const response = await contributionsAPI.getAll(params);
+      });
       setContributions(response.data.contributions || []);
       setStats(response.data.stats || { total: 0, this_month: 0, this_year: 0, pending: 0, confirmed: 0 });
       setPagination(response.data.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -99,11 +95,7 @@ export const Contributions: React.FC = () => {
 
   const fetchMembers = async () => {
     try {
-      const params: any = { limit: 100 };
-      if (selectedOrganizationId && userRole === 'super_admin') {
-        params.organization_id = selectedOrganizationId;
-      }
-      const response = await membersAPI.getAll(params);
+      const response = await membersAPI.getAll({ limit: 100 });
       setMembers(response.data.members || []);
     } catch (error) {
       console.error('Failed to fetch members:', error);
@@ -113,7 +105,7 @@ export const Contributions: React.FC = () => {
   useEffect(() => {
     fetchContributions();
     fetchMembers();
-  }, [pagination.page, searchTerm, statusFilter, selectedOrganizationId]);
+  }, [pagination.page, searchTerm, statusFilter]);
 
   const handleAddContribution = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,6 +118,7 @@ export const Contributions: React.FC = () => {
       await contributionsAPI.create({
         ...newContribution,
         amount: parseFloat(newContribution.amount),
+        recorded_by: user?.id,
       });
       toast.success('Contribution recorded successfully');
       setIsAddModalOpen(false);
@@ -142,15 +135,23 @@ export const Contributions: React.FC = () => {
     }
   };
 
-  const handleReconcile = async () => {
+  const handleExportCSV = async () => {
     try {
-      const response = await contributionsAPI.reconcile({});
-      setReconcileData(response.data);
-      setIsReconcileModalOpen(true);
-    } catch (error: any) {
-      toast.error('Failed to reconcile contributions');
+      const response = await contributionsAPI.export();
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `contributions_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Export started');
+    } catch (error) {
+      toast.error('Failed to export');
     }
   };
+
+  const canAddContribution = hasPermission('contribution.create') || isOrgAdmin || isSuperAdmin || isFinance;
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -161,9 +162,6 @@ export const Contributions: React.FC = () => {
     }
   };
 
-  const canAddContribution = userRole === 'edir_leader' || userRole === 'org_admin' || userRole === 'super_admin';
-  const canReconcile = userRole === 'finance' || userRole === 'super_admin';
-
   return (
     <div className="space-y-8 animate-in fade-in duration-700 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
@@ -172,17 +170,11 @@ export const Contributions: React.FC = () => {
           <p className="text-muted-foreground font-medium">{t('manage_contributions')}</p>
         </div>
         <div className="flex gap-3">
-          {canReconcile && (
-            <Button 
-              variant="outline" 
-              className="rounded-2xl border-2 font-bold h-12 text-primary border-primary/20 hover:border-primary/50"
-              onClick={handleReconcile}
-            >
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Reconcile
-            </Button>
-          )}
-          <Button variant="outline" className="rounded-2xl border-2 font-bold h-12 text-primary border-primary/20 hover:border-primary/50">
+          <Button 
+            variant="outline" 
+            className="rounded-2xl border-2 font-bold h-12 text-primary border-primary/20 hover:border-primary/50"
+            onClick={handleExportCSV}
+          >
             <Download className="w-4 h-4 mr-2" /> Report
           </Button>
           {canAddContribution && (
@@ -292,7 +284,7 @@ export const Contributions: React.FC = () => {
               </div>
               <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest bg-white/20 px-3 py-1 rounded-full">
                 <ArrowUpRight className="w-3 h-3" />
-                <span>Total</span>
+                <span>Total Collected</span>
               </div>
             </div>
             <div className="mt-8 relative z-10">
@@ -321,7 +313,7 @@ export const Contributions: React.FC = () => {
               <Badge className="bg-amber-500 text-white border-none font-bold">Pending</Badge>
             </div>
             <div className="mt-8">
-              <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Pending</p>
+              <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Pending Confirmations</p>
               <h3 className="text-4xl font-black mt-2 text-foreground">ETB {stats.pending.toLocaleString()}</h3>
             </div>
           </CardContent>
@@ -414,14 +406,14 @@ export const Contributions: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-8 py-4">
-                        <span className="font-black text-lg text-foreground">ETB {item.amount.toLocaleString()}</span>
+                        <span className="font-black text-lg text-foreground">ETB {item.amount?.toLocaleString() || '0'}</span>
                       </td>
                       <td className="px-8 py-4">
                         <span className="font-medium text-muted-foreground">{new Date(item.contribution_date).toLocaleDateString()}</span>
                       </td>
                       <td className="px-8 py-4">
                         <Badge variant="outline" className="rounded-lg font-bold border-2 border-muted text-foreground capitalize">
-                          {item.payment_method?.replace('_', ' ')}
+                          {item.payment_method?.replace('_', ' ') || 'N/A'}
                         </Badge>
                       </td>
                       <td className="px-8 py-4">
@@ -429,7 +421,7 @@ export const Contributions: React.FC = () => {
                       </td>
                       <td className="px-8 py-4">
                         <Badge className={cn("rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest shadow-sm", getStatusColor(item.status))}>
-                          {item.status}
+                          {item.status || 'pending'}
                         </Badge>
                       </td>
                       <td className="px-8 py-4 text-right">
@@ -468,45 +460,6 @@ export const Contributions: React.FC = () => {
           </div>
         </CardContent>
       </Card>
-
-      {/* Reconcile Dialog */}
-      <Dialog open={isReconcileModalOpen} onOpenChange={setIsReconcileModalOpen}>
-        <DialogContent className="sm:max-w-[600px] rounded-[2rem]">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-black">Contribution Reconciliation</DialogTitle>
-            <DialogDescription>
-              Summary of contributions for reconciliation.
-            </DialogDescription>
-          </DialogHeader>
-          {reconcileData && (
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div className="bg-green-50 p-4 rounded-xl">
-                  <p className="text-sm text-muted-foreground">Confirmed</p>
-                  <p className="text-2xl font-black text-green-600">ETB {reconcileData.summary.confirmed_amount?.toLocaleString() || '0'}</p>
-                </div>
-                <div className="bg-amber-50 p-4 rounded-xl">
-                  <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-2xl font-black text-amber-600">ETB {reconcileData.summary.pending_amount?.toLocaleString() || '0'}</p>
-                </div>
-                <div className="bg-red-50 p-4 rounded-xl">
-                  <p className="text-sm text-muted-foreground">Failed</p>
-                  <p className="text-2xl font-black text-red-600">ETB {reconcileData.summary.failed_amount?.toLocaleString() || '0'}</p>
-                </div>
-              </div>
-              <div className="border-t pt-4">
-                <p className="text-sm text-muted-foreground">Total Transactions</p>
-                <p className="text-xl font-bold">{reconcileData.summary.total_count || 0}</p>
-              </div>
-              <DialogFooter>
-                <Button onClick={() => setIsReconcileModalOpen(false)} className="w-full">
-                  Close
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

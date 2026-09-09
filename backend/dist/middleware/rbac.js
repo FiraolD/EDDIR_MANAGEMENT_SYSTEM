@@ -1,61 +1,97 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearPermissionCache = exports.checkOrganizationAccess = exports.hasPermission = void 0;
+exports.clearPermissionCache = exports.requireDualControl = exports.checkOrganizationAccess = exports.requireHierarchy = exports.requireRole = exports.hasPermission = void 0;
 const database_1 = require("../config/database");
-// Cache for role permissions
+// Role hierarchy for permission inheritance
+const roleHierarchy = {
+    'super_admin': 10,
+    'finance_auditor': 9,
+    'finance_approver': 8,
+    'finance_recon': 7,
+    'finance_processor': 6,
+    'org_admin': 5,
+    'claims_manager': 4,
+    'edir_leader': 3,
+    'member': 1
+};
+// Cache for permissions
 let permissionCache = new Map();
+// Fix: hasPermission should accept resource and action as separate parameters
 const hasPermission = (resource, action) => {
     return async (req, res, next) => {
         try {
             if (!req.user) {
                 return res.status(401).json({ error: 'Authentication required' });
             }
+            const userRole = req.user.role;
+            const permission = `${resource}.${action}`;
             // Super admin has all permissions
-            if (req.user.role === 'super_admin') {
+            if (userRole === 'super_admin') {
                 return next();
             }
-            const cacheKey = `${req.user.role}:${resource}:${action}`;
+            const cacheKey = `${userRole}:${permission}`;
             // Check cache
             if (permissionCache.has(cacheKey)) {
                 return next();
             }
-            // Check if role_permissions table exists, if not, allow by role
-            try {
-                const result = await (0, database_1.query)(`SELECT 1 FROM role_permissions rp
-                     JOIN permissions p ON p.id = rp.permission_id
-                     WHERE rp.role = $1 AND p.resource = $2 AND p.action = $3`, [req.user.role, resource, action]);
-                if (result.rows.length === 0) {
-                    // Fallback to role-based access if permissions table doesn't exist
-                    const roleAccess = {
-                        'org_admin': ['member', 'contribution', 'ledger', 'claim', 'report'],
-                        'edir_leader': ['member', 'contribution', 'claim', 'report'],
-                        'member': ['contribution', 'claim']
-                    };
-                    const allowedResources = roleAccess[req.user.role] || [];
-                    if (!allowedResources.includes(resource)) {
-                        return res.status(403).json({
-                            error: `Access denied. Required permission: ${resource}.${action}`
-                        });
-                    }
-                }
-            }
-            catch (err) {
-                // If permissions table doesn't exist, allow based on role
-                console.log('Permissions table not found, using role-based access');
+            // Check permission in database
+            const result = await (0, database_1.query)(`SELECT 1 FROM role_permissions 
+                 WHERE role = $1 AND (permission = $2 OR permission = '*')`, [userRole, permission]);
+            if (result.rows.length === 0) {
+                return res.status(403).json({
+                    error: `Access denied. Required permission: ${permission}`,
+                    role: userRole
+                });
             }
             // Cache the permission
-            permissionCache.set(cacheKey, true);
+            permissionCache.set(cacheKey, new Set());
             setTimeout(() => permissionCache.delete(cacheKey), 60000);
             next();
         }
         catch (error) {
             console.error('Permission check error:', error);
-            // On error, allow access to prevent blocking
-            next();
+            res.status(500).json({ error: 'Internal server error' });
         }
     };
 };
 exports.hasPermission = hasPermission;
+// Fix: requireRole should accept roles as separate arguments or an array
+const requireRole = (...roles) => {
+    return (req, res, next) => {
+        if (!req.user) {
+            return res.status(401).json({ error: 'Authentication required' });
+        }
+        if (req.user.role === 'super_admin') {
+            return next();
+        }
+        if (!roles.includes(req.user.role)) {
+            return res.status(403).json({
+                error: `Access denied. Required roles: ${roles.join(', ')}`,
+                current_role: req.user.role
+            });
+        }
+        next();
+    };
+};
+exports.requireRole = requireRole;
+const requireHierarchy = (minRole) => {
+    return (req, res, next) => {
+        if (!req.user) {
+            return res.status(401).json({ error: 'Authentication required' });
+        }
+        const userLevel = roleHierarchy[req.user.role] || 0;
+        const requiredLevel = roleHierarchy[minRole] || 0;
+        if (userLevel >= requiredLevel) {
+            return next();
+        }
+        return res.status(403).json({
+            error: `Access denied. Required minimum role: ${minRole}`,
+            current_role: req.user.role
+        });
+    };
+};
+exports.requireHierarchy = requireHierarchy;
+// Fix: checkOrganizationAccess - export this function
 const checkOrganizationAccess = async (req, res, next) => {
     try {
         const organizationId = req.params.organizationId || req.body.organization_id || req.query.organization_id;
@@ -78,6 +114,43 @@ const checkOrganizationAccess = async (req, res, next) => {
     }
 };
 exports.checkOrganizationAccess = checkOrganizationAccess;
+// Dual control for financial transactions
+const requireDualControl = (amount) => {
+    return async (req, res, next) => {
+        const THRESHOLD = 10000; // ETB 10,000
+        const HIGH_THRESHOLD = 50000; // ETB 50,000
+        if (amount <= THRESHOLD) {
+            return next();
+        }
+        if (!req.user) {
+            return res.status(401).json({ error: 'Authentication required' });
+        }
+        const workflowId = req.body.workflow_id || req.params.workflow_id;
+        if (amount > HIGH_THRESHOLD) {
+            const approvalCount = await (0, database_1.query)(`SELECT COUNT(*) FROM approval_requests 
+                 WHERE workflow_id = $1 AND status = 'approved'`, [workflowId]);
+            if (parseInt(approvalCount.rows[0].count) >= 2) {
+                return next();
+            }
+            return res.status(403).json({
+                error: 'High value transaction requires 3 approvals',
+                required: 3,
+                current: parseInt(approvalCount.rows[0].count)
+            });
+        }
+        const approvalCount = await (0, database_1.query)(`SELECT COUNT(*) FROM approval_requests 
+             WHERE workflow_id = $1 AND status = 'approved'`, [workflowId]);
+        if (parseInt(approvalCount.rows[0].count) >= 1) {
+            return next();
+        }
+        return res.status(403).json({
+            error: 'Transaction requires dual approval',
+            required: 2,
+            current: parseInt(approvalCount.rows[0].count)
+        });
+    };
+};
+exports.requireDualControl = requireDualControl;
 const clearPermissionCache = () => {
     permissionCache.clear();
 };

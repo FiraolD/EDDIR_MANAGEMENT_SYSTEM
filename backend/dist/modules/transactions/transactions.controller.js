@@ -36,10 +36,11 @@ const getTransactions = async (req, res) => {
                 t.created_at,
                 m.id AS member_id,
                 m.member_number,
-                m.full_name AS member_name,
+                u.full_name AS member_name,
                 t.organization_id
             FROM transactions t
-            LEFT JOIN members m ON m.id = t.member_id
+            join members m ON m.id = t.member_id
+            join users u ON u.id = m.user_id
             WHERE 1=1
         `;
         const params = [];
@@ -151,13 +152,15 @@ exports.getTransactions = getTransactions;
 const getTransactionById = async (req, res) => {
     try {
         const { id } = req.params;
+        const isSuperAdmin = req.user?.role === 'super_admin';
+        const organizationId = req.user?.organization_id;
         const result = await (0, database_1.query)(`SELECT 
                 t.*,
                 m.full_name AS member_name,
                 m.member_number
              FROM transactions t
              LEFT JOIN members m ON m.id = t.member_id
-             WHERE t.id = $1`, [id]);
+             WHERE t.id = $1 ${!isSuperAdmin ? 'AND t.organization_id = $2' : ''}`, isSuperAdmin ? [id] : [id, organizationId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Transaction not found' });
         }
@@ -206,6 +209,8 @@ const getTransactionStats = async (req, res) => {
 exports.getTransactionStats = getTransactionStats;
 const exportTransactions = async (req, res) => {
     try {
+        const isSuperAdmin = req.user?.role === 'super_admin';
+        const organizationId = req.user?.organization_id;
         const result = await (0, database_1.query)(`
             SELECT 
                 t.transaction_number AS "Transaction Number",
@@ -218,9 +223,10 @@ const exportTransactions = async (req, res) => {
                 t.description AS "Description"
             FROM transactions t
             LEFT JOIN members m ON m.id = t.member_id
+            ${!isSuperAdmin ? 'WHERE t.organization_id = $1' : ''}
             ORDER BY t.transaction_date DESC
-            LIMIT 10000
-        `);
+            LIMIT ${!isSuperAdmin ? '$2' : '$1'}
+        `, !isSuperAdmin ? [organizationId, 10000] : [10000]);
         const csvRows = [];
         const headers = Object.keys(result.rows[0] || {});
         csvRows.push(headers.join(','));

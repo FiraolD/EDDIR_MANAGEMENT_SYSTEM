@@ -9,18 +9,24 @@ const env_1 = require("../config/env");
 const generateAccessToken = (payload) => {
     return jsonwebtoken_1.default.sign(payload, env_1.env.jwt.secret, {
         expiresIn: env_1.env.jwt.expiresIn,
+        issuer: env_1.env.jwt.issuer,
+        audience: env_1.env.jwt.audience,
+        algorithm: 'HS256',
     });
 };
 exports.generateAccessToken = generateAccessToken;
 const generateRefreshToken = (payload) => {
     return jsonwebtoken_1.default.sign(payload, env_1.env.jwt.refreshSecret, {
         expiresIn: env_1.env.jwt.refreshExpiresIn,
+        issuer: env_1.env.jwt.issuer,
+        audience: env_1.env.jwt.audience,
+        algorithm: 'HS256',
     });
 };
 exports.generateRefreshToken = generateRefreshToken;
 const verifyAccessToken = (token) => {
     try {
-        return jsonwebtoken_1.default.verify(token, env_1.env.jwt.secret);
+        return jsonwebtoken_1.default.verify(token, env_1.env.jwt.secret, { algorithms: ['HS256'], issuer: env_1.env.jwt.issuer, audience: env_1.env.jwt.audience });
     }
     catch (error) {
         return null;
@@ -29,7 +35,7 @@ const verifyAccessToken = (token) => {
 exports.verifyAccessToken = verifyAccessToken;
 const verifyRefreshToken = (token) => {
     try {
-        return jsonwebtoken_1.default.verify(token, env_1.env.jwt.refreshSecret);
+        return jsonwebtoken_1.default.verify(token, env_1.env.jwt.refreshSecret, { algorithms: ['HS256'], issuer: env_1.env.jwt.issuer, audience: env_1.env.jwt.audience });
     }
     catch (error) {
         return null;

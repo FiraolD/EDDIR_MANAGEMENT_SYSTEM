@@ -3,61 +3,90 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteMember = exports.updateMemberRole = exports.addMemberToOrganization = exports.updateMemberStatus = exports.updateMember = exports.createMember = exports.getMemberById = exports.getMembers = void 0;
+exports.getMemberStats = exports.deleteMember = exports.updateMemberRole = exports.updateMemberStatus = exports.updateMember = exports.createMember = exports.getMemberById = exports.getMembers = void 0;
 const database_1 = require("../../config/database");
 const database_2 = __importDefault(require("../../config/database"));
 const bcrypt_1 = require("../../utils/bcrypt");
 const getMembers = async (req, res) => {
     try {
+        const organizationId = req.user?.organization_id;
+        const isSuperAdmin = req.user?.role === 'super_admin';
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const search = req.query.search;
         const status = req.query.status;
-        const organizationId = req.query.organization_id;
-        const isSuperAdmin = req.user?.role === 'super_admin';
-        const userOrgId = req.user?.organization_id;
+        const offset = (page - 1) * limit;
         let queryText = `
             SELECT 
-                m.id, m.member_number, m.full_name, m.phone, m.email,
-                m.status, m.join_date, m.total_contributions, m.last_contribution_date,
-                m.address, m.emergency_contact_name, m.emergency_contact_phone,
-                m.organization_id, o.name as organization_name,
-                'member' as role
+                m.id, 
+                m.member_number, 
+                u.full_name, 
+                u.phone, 
+                u.email,
+                m.status, 
+                m.join_date, 
+                m.total_contributions, 
+                m.last_contribution_date,
+                m.address, 
+                m.emergency_contact_name, 
+                m.emergency_contact_phone,
+                u.role,
+                o.name as organization_name,
+                u.organization_id
             FROM members m
-            LEFT JOIN organizations o ON o.id = m.organization_id
+            JOIN users u ON u.id = m.user_id
+            LEFT JOIN organizations o ON o.id = u.organization_id
             WHERE 1=1
         `;
         const params = [];
-        let idx = 1;
-        // Organization filter
-        if (isSuperAdmin && organizationId) {
-            queryText += ` AND m.organization_id = $${idx}`;
+        let paramIndex = 1;
+        // Filter by organization (non-super admin sees only their org)
+        if (!isSuperAdmin && organizationId) {
+            queryText += ` AND u.organization_id = $${paramIndex}`;
             params.push(organizationId);
-            idx++;
-        }
-        else if (!isSuperAdmin && userOrgId) {
-            queryText += ` AND m.organization_id = $${idx}`;
-            params.push(userOrgId);
-            idx++;
+            paramIndex++;
         }
         if (search) {
-            queryText += ` AND (m.full_name ILIKE $${idx} OR m.email ILIKE $${idx} OR m.phone ILIKE $${idx} OR m.member_number ILIKE $${idx})`;
+            queryText += ` AND (u.full_name ILIKE $${paramIndex} OR u.phone ILIKE $${paramIndex} OR m.member_number ILIKE $${paramIndex})`;
             params.push(`%${search}%`);
-            idx++;
+            paramIndex++;
         }
         if (status) {
-            queryText += ` AND m.status = $${idx}`;
+            queryText += ` AND m.status = $${paramIndex}`;
             params.push(status);
-            idx++;
+            paramIndex++;
         }
-        const offset = (page - 1) * limit;
-        queryText += ` ORDER BY m.join_date DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+        queryText += ` ORDER BY m.join_date DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
         params.push(limit, offset);
-        const membersResult = await (0, database_1.query)(queryText, params);
-        const total = membersResult.rowCount || 0;
+        const result = await (0, database_1.query)(queryText, params);
+        // Get total count with same filters
+        let countQuery = `
+            SELECT COUNT(*) as count 
+            FROM members m
+            JOIN users u ON u.id = m.user_id
+            WHERE 1=1
+        `;
+        const countParams = [];
+        let countIndex = 1;
+        if (!isSuperAdmin && organizationId) {
+            countQuery += ` AND u.organization_id = $${countIndex}`;
+            countParams.push(organizationId);
+            countIndex++;
+        }
+        if (search) {
+            countQuery += ` AND (u.full_name ILIKE $${countIndex} OR u.phone ILIKE $${countIndex} OR m.member_number ILIKE $${countIndex})`;
+            countParams.push(`%${search}%`);
+            countIndex++;
+        }
+        if (status) {
+            countQuery += ` AND m.status = $${countIndex}`;
+            countParams.push(status);
+        }
+        const countResult = await (0, database_1.query)(countQuery, countParams);
+        const total = parseInt(countResult.rows[0]?.count || '0');
         res.json({
             success: true,
-            members: membersResult.rows,
+            members: result.rows,
             pagination: {
                 page,
                 limit,
@@ -79,31 +108,41 @@ const getMemberById = async (req, res) => {
         const isSuperAdmin = req.user?.role === 'super_admin';
         let queryText = `
             SELECT 
-                m.*, u.full_name, u.email, u.phone, u.role,
+                m.*, 
+                u.full_name, 
+                u.email, 
+                u.phone, 
+                u.role,
                 o.name as organization_name,
                 (
                     SELECT json_agg(json_build_object(
-                        'id', c.id, 'amount', c.amount, 'date', c.contribution_date, 'status', c.status
+                        'id', c.id, 
+                        'amount', c.amount, 
+                        'date', c.contribution_date, 
+                        'status', c.status
                     ) ORDER BY c.contribution_date DESC LIMIT 5)
                     FROM contributions c
                     WHERE c.member_id = m.id
                 ) as recent_contributions,
                 (
                     SELECT json_agg(json_build_object(
-                        'id', cl.id, 'claim_number', cl.claim_number, 'amount', cl.amount, 'status', cl.status
+                        'id', cl.id, 
+                        'claim_number', cl.claim_number, 
+                        'amount', cl.amount, 
+                        'status', cl.status
                     ) ORDER BY cl.created_at DESC LIMIT 5)
                     FROM claims cl
                     WHERE cl.member_id = m.id
                 ) as recent_claims
             FROM members m
-            JOIN users u ON u.id = m.id
-            JOIN organizations o ON o.id = m.organization_id
+            JOIN users u ON u.id = m.user_id
+            LEFT JOIN organizations o ON o.id = u.organization_id
             WHERE m.id = $1
         `;
         const params = [id];
         // Add organization filter for non-super admin
         if (!isSuperAdmin && organizationId) {
-            queryText += ` AND m.organization_id = $2`;
+            queryText += ` AND u.organization_id = $2`;
             params.push(organizationId);
         }
         const result = await (0, database_1.query)(queryText, params);
@@ -143,7 +182,7 @@ const createMember = async (req, res) => {
                  VALUES ($1, $2, $3, $4, $5, $6) 
                  RETURNING id, email, phone, full_name`, [email, phone, fullName, passwordHash, role, organizationId]);
             const userId = userResult.rows[0].id;
-            const memberResult = await client.query(`INSERT INTO members (id, organization_id, member_number, address, emergency_contact_name, emergency_contact_phone, status, join_date) 
+            const memberResult = await client.query(`INSERT INTO members (user_id, organization_id, member_number, address, emergency_contact_name, emergency_contact_phone, status, join_date) 
                  VALUES ($1, $2, $3, $4, $5, $6, 'active', CURRENT_DATE)
                  RETURNING id, member_number`, [userId, organizationId, memberNumber, address, emergencyContactName, emergencyContactPhone]);
             await client.query('COMMIT');
@@ -215,7 +254,7 @@ const updateMemberStatus = async (req, res) => {
             return res.status(404).json({ error: 'Member not found' });
         }
         // Also update user active status
-        await (0, database_1.query)(`UPDATE users SET is_active = $1 WHERE id = (SELECT id FROM members WHERE id = $2)`, [status === 'active', id]);
+        await (0, database_1.query)(`UPDATE users SET is_active = $1 WHERE id = (SELECT user_id FROM members WHERE id = $2)`, [status === 'active', id]);
         res.json({
             success: true,
             message: `Member status updated to ${status}`,
@@ -228,64 +267,20 @@ const updateMemberStatus = async (req, res) => {
     }
 };
 exports.updateMemberStatus = updateMemberStatus;
-const addMemberToOrganization = async (req, res) => {
-    try {
-        const { organizationId } = req.params;
-        const { email, phone, fullName, password, address, emergencyContactName, emergencyContactPhone } = req.body;
-        // Check if user already exists
-        const existingUser = await (0, database_1.query)('SELECT id, email, phone FROM users WHERE email = $1 OR phone = $2', [email, phone]);
-        let userId;
-        if (existingUser.rows.length > 0) {
-            // User exists, check if they're already a member of this organization
-            const existingMember = await (0, database_1.query)('SELECT id FROM members WHERE id = $1 AND organization_id = $2', [existingUser.rows[0].id, organizationId]);
-            if (existingMember.rows.length > 0) {
-                return res.status(409).json({ error: 'User is already a member of this organization' });
-            }
-            userId = existingUser.rows[0].id;
-        }
-        else {
-            // Create new user
-            const passwordHash = await (0, bcrypt_1.hashPassword)(password);
-            const userResult = await (0, database_1.query)(`INSERT INTO users (email, phone, full_name, password_hash, role, organization_id) 
-                 VALUES ($1, $2, $3, $4, 'member', $5) 
-                 RETURNING id`, [email, phone, fullName, passwordHash, organizationId]);
-            userId = userResult.rows[0].id;
-        }
-        // Create member profile
-        const memberNumber = `MEM${organizationId.slice(0, 4)}${Date.now()}${Math.floor(Math.random() * 10000)}`;
-        const memberResult = await (0, database_1.query)(`INSERT INTO members (id, organization_id, member_number, address, emergency_contact_name, emergency_contact_phone, status, join_date) 
-             VALUES ($1, $2, $3, $4, $5, $6, 'active', CURRENT_DATE)
-             RETURNING id, member_number`, [userId, organizationId, memberNumber, address, emergencyContactName, emergencyContactPhone]);
-        res.status(201).json({
-            success: true,
-            message: 'Member added to organization successfully',
-            data: {
-                memberId: memberResult.rows[0].id,
-                memberNumber: memberResult.rows[0].member_number,
-                userId: userId
-            }
-        });
-    }
-    catch (error) {
-        console.error('Add member to organization error:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-};
-exports.addMemberToOrganization = addMemberToOrganization;
 const updateMemberRole = async (req, res) => {
     try {
         const { id } = req.params;
         const { role } = req.body;
-        const validRoles = ['member', 'edir_leader', 'org_admin'];
+        const validRoles = ['member', 'org_leader', 'org_admin', 'claims_manager', 'finance_processor', 'finance_approver', 'finance_recon', 'finance_auditor'];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: 'Invalid role' });
         }
-        // First get the id from member
-        const member = await (0, database_1.query)('SELECT id FROM members WHERE id = $1', [id]);
+        // First get the user_id from member
+        const member = await (0, database_1.query)('SELECT user_id FROM members WHERE id = $1', [id]);
         if (member.rows.length === 0) {
             return res.status(404).json({ error: 'Member not found' });
         }
-        const result = await (0, database_1.query)('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2 RETURNING id, role', [role, member.rows[0].id]);
+        const result = await (0, database_1.query)('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2 RETURNING id, role', [role, member.rows[0].user_id]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'User not found' });
         }
@@ -304,8 +299,8 @@ exports.updateMemberRole = updateMemberRole;
 const deleteMember = async (req, res) => {
     try {
         const { id } = req.params;
-        // First get the id
-        const member = await (0, database_1.query)('SELECT id FROM members WHERE id = $1', [id]);
+        // First get the user_id
+        const member = await (0, database_1.query)('SELECT user_id FROM members WHERE id = $1', [id]);
         if (member.rows.length === 0) {
             return res.status(404).json({ error: 'Member not found' });
         }
@@ -314,6 +309,8 @@ const deleteMember = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Member not found' });
         }
+        // Delete the user as well
+        await (0, database_1.query)('DELETE FROM users WHERE id = $1', [member.rows[0].user_id]);
         res.json({
             success: true,
             message: 'Member deleted successfully',
@@ -325,3 +322,34 @@ const deleteMember = async (req, res) => {
     }
 };
 exports.deleteMember = deleteMember;
+const getMemberStats = async (req, res) => {
+    try {
+        const organizationId = req.user?.organization_id;
+        const isSuperAdmin = req.user?.role === 'super_admin';
+        let queryText = `
+            SELECT 
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'active') as active,
+                COUNT(*) FILTER (WHERE status = 'inactive') as inactive,
+                COUNT(*) FILTER (WHERE status = 'pending') as pending,
+                COALESCE(SUM(total_contributions), 0) as total_contributions
+            FROM members m
+            JOIN users u ON u.id = m.user_id
+            WHERE 1=1
+        `;
+        const params = [];
+        let paramIndex = 1;
+        if (!isSuperAdmin && organizationId) {
+            queryText += ` AND u.organization_id = $${paramIndex}`;
+            params.push(organizationId);
+            paramIndex++;
+        }
+        const result = await (0, database_1.query)(queryText, params);
+        res.json(result.rows[0] || { total: 0, active: 0, inactive: 0, pending: 0, total_contributions: 0 });
+    }
+    catch (error) {
+        console.error('Get member stats error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+exports.getMemberStats = getMemberStats;

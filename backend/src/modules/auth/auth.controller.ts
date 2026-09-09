@@ -3,26 +3,32 @@ import { query } from '../../config/database';
 import { hashPassword, comparePassword } from '../../utils/bcrypt';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken, TokenPayload } from '../../utils/jwt';
 import { AuthRequest } from '../../middleware/auth';
+import { isValidEmail, isValidPhone, isValidPassword } from '../../utils/validation';
+import crypto from 'crypto';
+import { sendResetEmail } from '../../utils/mail';
+
+const passwordMeetsPolicy = (password: unknown): password is string => (
+    typeof password === 'string' && password.length >= 12 && password.length <= 256 &&
+    /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password)
+);
 
 export const login = async (req: Request, res: Response) => {
     try {
         const { identifier, password } = req.body;
         
-        console.log('Login attempt:', { identifier });
-        
-        if (!identifier || !password) {
+        const normalizedIdentifier = typeof identifier === 'string' ? identifier.trim().toLowerCase() : '';
+
+        if (!normalizedIdentifier || typeof password !== 'string' || password.length > 256) {
             return res.status(400).json({ error: 'Email/phone and password are required' });
         }
         
         // Fix: Use $1 for both parameters with OR
         const result = await query(
-            `SELECT id, email, phone, full_name, password_hash, role, is_active, organization_id 
+            `SELECT id, email, phone, full_name, password_hash, role, is_active, organization_id, token_version 
              FROM users 
              WHERE email = $1 OR phone = $1`,
-            [identifier]  // Only one parameter for both conditions
+            [normalizedIdentifier]
         );
-        
-        console.log('Query result rows:', result.rows.length);
         
         if (result.rows.length === 0) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -34,10 +40,7 @@ export const login = async (req: Request, res: Response) => {
             return res.status(401).json({ error: 'Account is disabled' });
         }
         
-        // Compare password
         const isValidPassword = await comparePassword(password, user.password_hash);
-        
-        console.log('Password valid:', isValidPassword);
         
         if (!isValidPassword) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -52,6 +55,7 @@ export const login = async (req: Request, res: Response) => {
             phone: user.phone,
             role: user.role,
             organization_id: user.organization_id,
+            token_version: user.token_version,
         };
         
         const accessToken = generateAccessToken(payload);
@@ -81,22 +85,22 @@ export const login = async (req: Request, res: Response) => {
 
 export const register = async (req: Request, res: Response) => {
     try {
-        const { email, phone, fullName, password, organization_id } = req.body;
+        const { email, phone, fullName, password } = req.body;
+        const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+        const normalizedPhone = typeof phone === 'string' ? phone.replace(/[\s-]/g, '') : '';
+        const normalizedName = typeof fullName === 'string' ? fullName.trim() : '';
         
-        console.log('Register attempt:', { email, phone, fullName });
-        
-        if (!email || !phone || !fullName || !password) {
-            return res.status(400).json({ error: 'All fields are required' });
+        if (!isValidEmail(normalizedEmail) || !isValidPhone(normalizedPhone) || !normalizedName || !isValidPassword(password) || password.length > 256) {
+            return res.status(400).json({ error: 'Provide a valid email, Ethiopian phone number, full name, and password of at least 12 characters' });
         }
-        
-        if (password.length < 6) {
-            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        if (!passwordMeetsPolicy(password)) {
+            return res.status(400).json({ error: 'Password must be at least 12 characters and include uppercase, lowercase, number, and symbol' });
         }
         
         // Check if user exists
         const existing = await query(
             'SELECT id FROM users WHERE email = $1 OR phone = $2',
-            [email, phone]
+            [normalizedEmail, normalizedPhone]
         );
         
         if (existing.rows.length > 0) {
@@ -106,8 +110,8 @@ export const register = async (req: Request, res: Response) => {
         const passwordHash = await hashPassword(password);
         
         // Get or create default organization
-        let orgId = organization_id;
-        if (!orgId) {
+        let orgId: string;
+        {
             // Check if default org exists
             const defaultOrg = await query(
                 'SELECT id FROM organizations WHERE subdomain = $1',
@@ -132,7 +136,7 @@ export const register = async (req: Request, res: Response) => {
             `INSERT INTO users (email, phone, full_name, password_hash, role, organization_id) 
              VALUES ($1, $2, $3, $4, 'member', $5) 
              RETURNING id, email, phone, full_name, role, organization_id`,
-            [email, phone, fullName, passwordHash, orgId]
+            [normalizedEmail, normalizedPhone, normalizedName, passwordHash, orgId]
         );
         
         const user = result.rows[0];
@@ -191,7 +195,7 @@ export const refreshToken = async (req: Request, res: Response) => {
         
         // Get fresh user data
         const result = await query(
-            'SELECT id, email, phone, role, organization_id FROM users WHERE id = $1 AND is_active = true',
+            'SELECT id, email, phone, role, organization_id, token_version FROM users WHERE id = $1 AND is_active = true',
             [user.id]
         );
         
@@ -207,6 +211,7 @@ export const refreshToken = async (req: Request, res: Response) => {
             phone: freshUser.phone,
             role: freshUser.role,
             organization_id: freshUser.organization_id,
+            token_version: freshUser.token_version,
         };
         
         const newAccessToken = generateAccessToken(payload);
@@ -223,6 +228,7 @@ export const refreshToken = async (req: Request, res: Response) => {
 
 export const logout = async (req: AuthRequest, res: Response) => {
     try {
+        await query('UPDATE users SET token_version = token_version + 1, updated_at = NOW() WHERE id = $1', [req.user?.id]);
         res.json({
             success: true,
             message: 'Logged out successfully',
@@ -279,8 +285,8 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ error: 'Current password and new password are required' });
         }
         
-        if (newPassword.length < 6) {
-            return res.status(400).json({ error: 'New password must be at least 6 characters' });
+        if (!passwordMeetsPolicy(newPassword)) {
+            return res.status(400).json({ error: 'New password must be at least 12 characters and include uppercase, lowercase, number, and symbol' });
         }
         
         // Get current user
@@ -302,7 +308,7 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
         const newPasswordHash = await hashPassword(newPassword);
         
         await query(
-            'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+            'UPDATE users SET password_hash = $1, token_version = token_version + 1, updated_at = NOW() WHERE id = $2',
             [newPasswordHash, userId]
         );
         
@@ -319,14 +325,15 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
 export const forgotPassword = async (req: Request, res: Response) => {
     try {
         const { email } = req.body;
+        const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
         
-        if (!email) {
+        if (!isValidEmail(normalizedEmail)) {
             return res.status(400).json({ error: 'Email is required' });
         }
         
         const result = await query(
             'SELECT id, email FROM users WHERE email = $1',
-            [email]
+            [normalizedEmail]
         );
         
         if (result.rows.length === 0) {
@@ -337,6 +344,16 @@ export const forgotPassword = async (req: Request, res: Response) => {
             });
         }
         
+        const rawToken = crypto.randomBytes(32).toString('base64url');
+        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        await query('DELETE FROM password_reset_tokens WHERE user_id = $1 OR expires_at < NOW()', [result.rows[0].id]);
+        await query(
+            `INSERT INTO password_reset_tokens (token_hash, user_id, expires_at)
+             VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+            [tokenHash, result.rows[0].id]
+        );
+        await sendResetEmail(result.rows[0].email, rawToken);
+
         res.json({
             success: true,
             message: 'If an account exists with that email, you will receive a password reset link',
@@ -355,10 +372,26 @@ export const resetPassword = async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Token and new password are required' });
         }
         
-        if (newPassword.length < 6) {
-            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        if (!passwordMeetsPolicy(newPassword)) {
+            return res.status(400).json({ error: 'Password must be at least 12 characters and include uppercase, lowercase, number, and symbol' });
         }
-        
+
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const tokenResult = await query(
+            `UPDATE password_reset_tokens
+             SET used_at = NOW()
+             WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+             RETURNING user_id`,
+            [tokenHash]
+        );
+        if (tokenResult.rows.length === 0) {
+            return res.status(400).json({ error: 'Invalid or expired reset token' });
+        }
+
+        const passwordHash = await hashPassword(newPassword);
+        const userId = tokenResult.rows[0].user_id;
+        await query('UPDATE users SET password_hash = $1, token_version = token_version + 1, updated_at = NOW() WHERE id = $2 AND is_active = true', [passwordHash, userId]);
+
         res.json({
             success: true,
             message: 'Password reset successfully',

@@ -268,13 +268,15 @@ const getOrganizationMembers = async (req, res) => {
         const result = await (0, database_1.query)(`SELECT 
                 m.id, 
                 m.member_number, 
-                m.full_name, 
-                m.email, 
-                m.phone,
+                m.user_id,
+                u.full_name, 
+                u.email, 
+                u.phone,
                 m.status, 
                 m.join_date, 
                 m.total_contributions
              FROM members m
+             JOIN users u ON u.id = m.user_id
              WHERE m.organization_id = $1
              ORDER BY m.join_date DESC`, [id]);
         res.json({

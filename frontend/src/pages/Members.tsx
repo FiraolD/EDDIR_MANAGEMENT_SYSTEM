@@ -57,9 +57,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import api from '@/services/api';
 import { membersAPI } from '@/services/api';
+import api from '@/services/api';
 
+// Define types
 interface Member {
   id: string;
   member_number: string;
@@ -73,8 +74,8 @@ interface Member {
   address?: string;
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
-  role: 'member' | 'super_admin' | 'org_admin' | 'edir_leader';
-  organization_id?: string;
+  role: 'super_admin' | 'org_admin' | 'claims_manager' | 'finance_processor' | 'finance_approver' | 'finance_recon' | 'finance_auditor' | 'edir_leader' | 'member';
+  organizationId?: string;
   organization_name?: string;
 }
 
@@ -86,7 +87,7 @@ interface Organization {
 
 export const Members: React.FC = () => {
   const { t, user } = useAppContext();
-  const { can, userRole } = usePermissions();
+  const { hasPermission, role: userRole, isSuperAdmin, isOrgAdmin, isOrgLeader } = usePermissions();
   const [members, setMembers] = useState<Member[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -94,8 +95,6 @@ export const Members: React.FC = () => {
   const [filterOrganization, setFilterOrganization] = useState<string>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | null>(null);
-  const [userOrganizationId, setUserOrganizationId] = useState<string | null>(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [newMember, setNewMember] = useState({
     fullName: '',
@@ -104,47 +103,46 @@ export const Members: React.FC = () => {
     password: '',
     address: '',
     role: 'member',
-    organization_id: '',
+    organizationId: '',
     emergencyContactName: '',
     emergencyContactPhone: ''
   });
 
-// In Members.tsx, inside fetchMembers:
-const fetchMembers = async () => {
+  const fetchMembers = async () => {
     setLoading(true);
     try {
-        const params: any = {
-            page: pagination.page,
-            limit: pagination.limit,
-        };
-        if (searchTerm) params.search = searchTerm;
-        if (filterStatus && filterStatus !== 'all') params.status = filterStatus;
-        if (selectedOrganizationId) {
-            params.organization_id = selectedOrganizationId;
-        }
-        const response = await membersAPI.getAll(params);
-        setMembers(response.data.members);
-        setPagination(response.data.pagination);
+      const params: any = {
+        page: pagination.page,
+        limit: pagination.limit,
+      };
+      if (searchTerm) params.search = searchTerm;
+      if (filterStatus && filterStatus !== 'all') params.status = filterStatus;
+      if (filterOrganization && filterOrganization !== 'all') params.organizationId = filterOrganization;
+      
+      const response = await membersAPI.getAll(params);
+      setMembers(response.data.members || []);
+      setPagination(response.data.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 });
     } catch (error: any) {
-        toast.error(error.response?.data?.error || 'Failed to fetch members');
+      console.error('Fetch members error:', error);
+      toast.error(error.response?.data?.error || 'Failed to fetch members');
     } finally {
-        setLoading(false);
-    }
-};
-
-  const fetchOrganizations = async () => {
-    if (userRole !== 'super_admin') return;
-    try {
-      const response = await api.get('/organizations', { params: { limit: 100 } });
-      setOrganizations(response.data.organizations);
-    } catch (error) {
-      console.error('Failed to fetch organizations:', error);
+      setLoading(false);
     }
   };
 
+ const fetchOrganizations = async () => {
+    if (!isSuperAdmin) return;
+    try {
+        const response = await api.get('/organizations', { params: { limit: 100 } });
+        setOrganizations(response.data.organizations || []);
+    } catch (error) {
+        console.error('Failed to fetch organizations:', error);
+    }
+};
+
   useEffect(() => {
     fetchMembers();
-    if (userRole === 'super_admin') {
+    if (isSuperAdmin) {
       fetchOrganizations();
     }
   }, [pagination.page, searchTerm, filterStatus, filterOrganization]);
@@ -163,12 +161,17 @@ const fetchMembers = async () => {
     }
     
     // For non-super admin, auto-assign to their organization
-    if (userRole !== 'super_admin' && user?.organization_id) {
-      newMember.organization_id = user.organization_id;
+    if (!isSuperAdmin && user?.organizationId) {
+      newMember.organizationId = user.organizationId;
+    }
+    
+    if (!newMember.organizationId && !isSuperAdmin) {
+      toast.error('Organization is required');
+      return;
     }
     
     try {
-      await api.post('/members', newMember);
+      await membersAPI.create(newMember);
       toast.success('Member added successfully');
       setIsAddModalOpen(false);
       setNewMember({
@@ -178,7 +181,7 @@ const fetchMembers = async () => {
         password: '',
         address: '',
         role: 'member',
-        organization_id: '',
+        organizationId: '',
         emergencyContactName: '',
         emergencyContactPhone: ''
       });
@@ -190,7 +193,7 @@ const fetchMembers = async () => {
 
   const handleUpdateStatus = async (id: string, status: string) => {
     try {
-      await api.put(`/members/${id}/status`, { status });
+      await membersAPI.updateStatus(id, status);
       toast.success(`Member status updated to ${status}`);
       fetchMembers();
     } catch (error: any) {
@@ -200,7 +203,7 @@ const fetchMembers = async () => {
 
   const handleUpdateRole = async (id: string, role: string) => {
     try {
-      await api.put(`/members/${id}/role`, { role });
+      await membersAPI.updateRole(id, role);
       toast.success(`Member role updated to ${role}`);
       fetchMembers();
     } catch (error: any) {
@@ -211,7 +214,7 @@ const fetchMembers = async () => {
   const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
       try {
-        await api.delete(`/members/${id}`);
+        await membersAPI.delete(id);
         toast.success('Member deleted successfully');
         fetchMembers();
       } catch (error: any) {
@@ -226,8 +229,18 @@ const fetchMembers = async () => {
         return 'bg-purple-100 text-purple-700';
       case 'org_admin':
         return 'bg-indigo-100 text-indigo-700';
-      case 'edir_leader':
+      case 'claims_manager':
+        return 'bg-cyan-100 text-cyan-700';
+      case 'finance_processor':
+        return 'bg-emerald-100 text-emerald-700';
+      case 'finance_approver':
+        return 'bg-teal-100 text-teal-700';
+      case 'finance_recon':
         return 'bg-blue-100 text-blue-700';
+      case 'finance_auditor':
+        return 'bg-rose-100 text-rose-700';
+      case 'edir_leader':
+        return 'bg-sky-100 text-sky-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
@@ -239,6 +252,16 @@ const fetchMembers = async () => {
         return 'Super Admin';
       case 'org_admin':
         return 'Org Admin';
+      case 'claims_manager':
+        return 'Claims Manager';
+      case 'finance_processor':
+        return 'Finance Processor';
+      case 'finance_approver':
+        return 'Finance Approver';
+      case 'finance_recon':
+        return 'Finance Recon';
+      case 'finance_auditor':
+        return 'Finance Auditor';
       case 'edir_leader':
         return 'Edir Leader';
       default:
@@ -258,15 +281,17 @@ const fetchMembers = async () => {
   };
 
   const getInitials = (name: string | null | undefined) => {
-  if (!name) return '??';
-  return name
-    .split(' ')
-    .map(n => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-};
-  const canAddMember = can('member', 'create') || userRole === 'org_admin' || userRole === 'super_admin';
+    if (!name) return '??';
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  // Check if user can add members
+  const canAddMember = hasPermission('create') || isOrgAdmin || isSuperAdmin;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
@@ -341,12 +366,12 @@ const fetchMembers = async () => {
                   </div>
                   
                   {/* Organization selector for Super Admin */}
-                  {userRole === 'super_admin' && (
+                  {isSuperAdmin && (
                     <div className="space-y-2">
                       <Label className="font-bold">Organization *</Label>
                       <Select 
-                        value={newMember.organization_id} 
-                        onValueChange={(value) => setNewMember({...newMember, organization_id: value})}
+                        value={newMember.organizationId} 
+                        onValueChange={(value) => setNewMember({...newMember, organizationId: value})}
                       >
                         <SelectTrigger className="h-12 rounded-xl">
                           <SelectValue placeholder="Select organization" />
@@ -374,8 +399,13 @@ const fetchMembers = async () => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="member">Member</SelectItem>
-                          {userRole === 'super_admin' && <SelectItem value="edir_leader">Edir Leader</SelectItem>}
-                          {userRole === 'super_admin' && <SelectItem value="org_admin">Organization Admin</SelectItem>}
+                          {isSuperAdmin && <SelectItem value="edir_leader">Edir Leader</SelectItem>}
+                          {isSuperAdmin && <SelectItem value="org_admin">Organization Admin</SelectItem>}
+                          {isSuperAdmin && <SelectItem value="claims_manager">Claims Manager</SelectItem>}
+                          {isSuperAdmin && <SelectItem value="finance_processor">Finance Processor</SelectItem>}
+                          {isSuperAdmin && <SelectItem value="finance_approver">Finance Approver</SelectItem>}
+                          {isSuperAdmin && <SelectItem value="finance_recon">Finance Recon</SelectItem>}
+                          {isSuperAdmin && <SelectItem value="finance_auditor">Finance Auditor</SelectItem>}
                         </SelectContent>
                       </Select>
                     </div>
@@ -447,7 +477,7 @@ const fetchMembers = async () => {
                 </SelectContent>
               </Select>
               
-              {userRole === 'super_admin' && (
+              {isSuperAdmin && (
                 <Select value={filterOrganization} onValueChange={setFilterOrganization}>
                   <SelectTrigger className="w-[180px] h-12 rounded-xl">
                     <SelectValue placeholder="All Organizations" />
@@ -568,18 +598,20 @@ const fetchMembers = async () => {
                               <MoreVertical className="w-4 h-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem onClick={() => handleUpdateStatus(member.id, member.status === 'active' ? 'inactive' : 'active')}>
                               <CheckCircle2 className="w-4 h-4 mr-2" />
                               {member.status === 'active' ? 'Deactivate' : 'Activate'}
                             </DropdownMenuItem>
-                            {userRole === 'super_admin' && member.role !== 'super_admin' && member.role !== 'org_admin' && (
+                            
+                            {isSuperAdmin && member.role !== 'super_admin' && member.role !== 'org_admin' && (
                               <DropdownMenuItem onClick={() => handleUpdateRole(member.id, member.role === 'member' ? 'edir_leader' : 'member')}>
                                 <Shield className="w-4 h-4 mr-2" />
                                 {member.role === 'member' ? 'Make Edir Leader' : 'Make Member'}
                               </DropdownMenuItem>
                             )}
-                            {userRole === 'super_admin' && member.role !== 'super_admin' && (
+                            
+                            {isSuperAdmin && member.role !== 'super_admin' && (
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem 

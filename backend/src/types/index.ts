@@ -195,7 +195,17 @@ export interface AuthRequest extends Request {
     role: string;
   };
 }
-
+// Update the UserRole type
+export type UserRole = 
+  | 'super_admin' 
+  | 'org_admin' 
+  | 'claims_manager' 
+  | 'finance_processor' 
+  | 'finance_approver' 
+  | 'finance_recon' 
+  | 'finance_auditor' 
+  | 'edir_leader' 
+  | 'member';
 // Chart data types
 export interface ChartDataPoint {
   label: string;

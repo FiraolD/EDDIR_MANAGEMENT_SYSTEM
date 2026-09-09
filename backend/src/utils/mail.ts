@@ -1,20 +1,20 @@
 import nodemailer from 'nodemailer';
 
 const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.ethereal.email',
+    host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER || 'fira.de00@gmail.com',
-        pass: process.env.SMTP_PASS || 'wwhn klmg setb yxdc',
-    },
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: process.env.SMTP_USER && process.env.SMTP_PASS ? {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+    } : undefined,
 });
 
 export const sendResetEmail = async (to: string, token: string) => {
     const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
 
     const mailOptions = {
-        from: `"Awash Edir" <${process.env.SMTP_FROM || 'fira.de00@gmail.com'}>`,
+        from: `"EddirConnect" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
         to,
         subject: 'Password Reset Request',
         html: `

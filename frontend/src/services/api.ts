@@ -141,6 +141,8 @@ export const claimsAPI = {
 },
   
   advance: (id: string) => api.put(`/claims/${id}/advance`),
+
+  pay: (id: string) => api.put(`/claims/${id}/pay`),
   
   updateStatus: (id: string, status: string) => api.put(`/claims/${id}/status`, { status }),
   

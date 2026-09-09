@@ -7,14 +7,13 @@ type Language = 'en' | 'am' | 'ao';
 type Theme = 'light' | 'dark';
 
 interface User {
-  id: string;
-  email: string;
-  phone: string;
-  fullName: string;
-  role: string;
-  memberId?: string;
-  memberNumber?: string;
-  organizationId?: string;
+    id: string;
+    email: string;
+    phone: string;
+    fullName: string;
+    role: string;
+    organizationId?: string;
+    organizationName?: string;
 }
 
 interface DashboardStats {
@@ -81,6 +80,8 @@ const translations: Record<Language, Record<string, string>> = {
     record_contribution: 'Record Contribution',
     report_claim: 'Report Claim',
     logout: 'Log Out',
+    finance: 'Finance',
+    claims_review: 'Claims Review',
     welcome: 'Welcome back',
     search: 'Search...',
     language: 'Language',

@@ -1,5 +1,5 @@
 {
-  "name": "awash-edir-backend",
+  "name": "EMS-backend",
   "version": "1.0.0",
   "description": "Backend API for Awash Eddir Management System",
   "main": "dist/index.js",
@@ -7,7 +7,7 @@
     "dev": "nodemon src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:init": "psql -U postgres -d awash_edir -f database.sql"
+    "db:init": "psql -U postgres -d EMS -f database.sql"
   },
   "dependencies": {
     "axios": "^1.16.1",

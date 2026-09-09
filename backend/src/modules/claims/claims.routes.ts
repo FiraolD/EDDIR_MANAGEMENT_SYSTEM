@@ -42,17 +42,17 @@ const upload = multer({
 // All claim routes require authentication
 router.use(authenticate);
 
-// Get claims (with optional filters)
+// Get claims with filters
 router.get(
     '/',
-    authorize('super_admin', 'org_admin', 'edir_leader', 'finance'),
+    authorize('super_admin', 'org_admin', 'edir_leader', 'finance_approver', 'finance_processor', 'finance_recon', 'finance_auditor'),
     getClaims
 );
 
 // Get claim statistics
 router.get(
     '/stats',
-    authorize('super_admin', 'org_admin', 'finance'),
+    authorize('super_admin', 'org_admin', 'finance_approver', 'finance_processor', 'finance_recon', 'finance_auditor'),
     getClaimStats
 );
 
@@ -66,12 +66,11 @@ router.get(
 // Get a single claim by ID
 router.get(
     '/:id',
-    authorize('super_admin', 'org_admin', 'edir_leader', 'finance'),
+    authorize('super_admin', 'org_admin', 'edir_leader', 'finance_approver', 'finance_processor', 'finance_recon', 'finance_auditor'),
     getClaimById
 );
 
 // Create a new claim with file upload – only Edir Leaders and above
-// Casting to 'any' bypasses the type mismatch between Express versions
 router.post(
     '/',
     authorize('super_admin', 'org_admin', 'edir_leader'),
@@ -82,7 +81,7 @@ router.post(
 // Advance a claim to the next status
 router.put(
     '/:id/advance',
-    authorize('super_admin', 'org_admin', 'edir_leader', 'finance'),
+    authorize('super_admin', 'org_admin', 'edir_leader', 'claims_manager', 'finance_approver', 'finance_processor', 'finance_recon', 'finance_auditor'),
     advanceClaim
 );
 
@@ -107,4 +106,5 @@ router.delete(
     deleteClaim
 );
 
+// Default export
 export default router;

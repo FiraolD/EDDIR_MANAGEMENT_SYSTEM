@@ -3,9 +3,9 @@ version: '3.8'
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: awash-edir-db
+    container_name: EMS-db
     environment:
-      POSTGRES_DB: awash_edir
+      POSTGRES_DB: EMS
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: your_secure_password_here
     ports:
@@ -23,12 +23,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: awash-edir-backend
+    container_name: EMS-backend
     environment:
       NODE_ENV: production
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: awash_edir
+      DB_NAME: EMS
       DB_USER: postgres
       DB_PASSWORD: your_secure_password_here
       JWT_SECRET: your-super-secret-jwt-key-change-this

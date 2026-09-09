@@ -32,7 +32,7 @@ CREATE TYPE organization_type AS ENUM ('parent', 'edir');
 CREATE TYPE user_role AS ENUM ('super_admin', 'org_admin', 'edir_leader', 'member');
 CREATE TYPE member_status AS ENUM ('active', 'inactive', 'pending');
 CREATE TYPE contribution_status AS ENUM ('pending', 'confirmed', 'failed');
-CREATE TYPE claim_status AS ENUM ('reported', 'leader_approved', 'admin_approved', 'processing', 'paid');
+CREATE TYPE claim_status AS ENUM ('reported', 'leader_approved', 'admin_approved', 'claims_approved', 'processing', 'paid');
 CREATE TYPE transaction_type AS ENUM ('credit', 'debit');
 CREATE TYPE transaction_category AS ENUM ('contribution', 'claim_payout', 'registration', 'service_fee', 'utility');
 
@@ -74,10 +74,22 @@ CREATE TABLE users (
     organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
     fcm_token TEXT,
     is_active BOOLEAN DEFAULT true,
+    token_version INTEGER NOT NULL DEFAULT 0,
     last_login TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE password_reset_tokens (
+    token_hash CHAR(64) PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_password_reset_tokens_user ON password_reset_tokens(user_id);
+CREATE INDEX idx_password_reset_tokens_expiry ON password_reset_tokens(expires_at);
 
 -- ============================================
 -- ORGANIZATION LEADERS (Specific to each Edir)
@@ -155,6 +167,7 @@ CREATE TABLE claims (
     approved_at TIMESTAMPTZ,
     paid_at TIMESTAMPTZ,
     notes TEXT,
+    created_by UUID REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

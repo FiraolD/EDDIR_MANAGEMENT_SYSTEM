@@ -56,15 +56,15 @@ interface Claim {
 
 const workflowSteps = [
   { id: 'reported', label: 'Reported', icon: AlertTriangle, color: 'text-amber-500' },
-  { id: 'leader_approved', label: 'Leader Approval', icon: User, color: 'text-indigo-500' },
   { id: 'admin_approved', label: 'Admin Approval', icon: ShieldCheck, color: 'text-primary' },
+  { id: 'Claims_approved', label: 'Claims Approval', icon: User, color: 'text-indigo-500' },
   { id: 'processing', label: 'Payout Processing', icon: CreditCard, color: 'text-secondary' },
   { id: 'paid', label: 'Paid', icon: CheckCircle2, color: 'text-blue-500' },
 ];
 
 export const Claims: React.FC = () => {
   const { t, selectedOrganizationId } = useAppContext();
-  const { userRole } = usePermissions();
+  const { userRole, isFinance, isOrgLeader } = usePermissions();
   const [claims, setClaims] = useState<Claim[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -157,12 +157,12 @@ export const Claims: React.FC = () => {
       toast.error(error.response?.data?.error || 'Failed to report claim');
     }
   };
-/*
+
   const handleAdvanceClaim = async (id: string) => {
     const claim = claims.find(c => c.id === id);
     if (!claim) return;
 
-    if (userRole === 'finance' && claim.status === 'processing') {
+    if (isFinance && claim.status === 'processing') {
       if (!window.confirm('Confirm payout completion. Mark this claim as paid?')) return;
       try {
         await claimsAPI.pay(id);
@@ -182,9 +182,10 @@ export const Claims: React.FC = () => {
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to advance claim');
     }
-  }; */
+  }; 
 const [refreshKey, setRefreshKey] = useState(0);
-const handleAdvanceClaim = async (id: string) => {
+
+/**const handleAdvanceClaim = async (id: string) => {
   const claimIndex = claims.findIndex(c => c.id === id);
   if (claimIndex === -1) return;
 
@@ -210,7 +211,7 @@ const handleAdvanceClaim = async (id: string) => {
     fetchClaims(); // refresh to actual state
     toast.error('Failed to advance claim');
   }
-};
+};**/
 
 
 
@@ -222,7 +223,7 @@ const handleAdvanceClaim = async (id: string) => {
     return index >= 0 ? index : 0;
   };
 
-  const canCreateClaim = userRole === 'edir_leader' || userRole === 'org_admin' || userRole === 'super_admin';
+  const canCreateClaim = isOrgLeader || userRole === 'org_admin' || userRole === 'super_admin';
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700 pb-12">
@@ -468,7 +469,7 @@ const handleAdvanceClaim = async (id: string) => {
                               Mark as Paid
                             </Button>
                           ) : (
-                            (userRole === 'edir_leader' || userRole === 'org_admin' || userRole === 'super_admin') && (
+                            (isOrgLeader || userRole === 'org_admin' || userRole === 'super_admin') && (
                               <Button 
                                 size="lg" 
                                 onClick={() => handleAdvanceClaim(claim.id)}

@@ -32,9 +32,10 @@ const getContributions = async (req, res) => {
                 c.created_at,
                 m.id AS member_id, 
                 m.member_number,
-                m.full_name AS member_name
+                u.full_name AS member_name
             FROM contributions c
             JOIN members m ON m.id = c.member_id
+            join users u ON u.id = m.user_id
             WHERE 1=1
         `;
         const params = [];
@@ -45,7 +46,7 @@ const getContributions = async (req, res) => {
             idx++;
         }
         if (search) {
-            queryText += ` AND (m.full_name ILIKE $${idx} OR m.member_number ILIKE $${idx})`;
+            queryText += ` AND (u.full_name ILIKE $${idx} OR m.member_number ILIKE $${idx})`;
             params.push(`%${search}%`);
             idx++;
         }
@@ -85,7 +86,7 @@ const getContributions = async (req, res) => {
             sIdx++;
         }
         if (search) {
-            statsQuery += ` AND (m.full_name ILIKE $${sIdx} OR m.member_number ILIKE $${sIdx})`;
+            statsQuery += ` AND (u.full_name ILIKE $${sIdx} OR m.member_number ILIKE $${sIdx})`;
             statsParams.push(`%${search}%`);
             sIdx++;
         }
@@ -127,7 +128,7 @@ const getContributionById = async (req, res) => {
         const { id } = req.params;
         const result = await (0, database_1.query)(`SELECT 
                 c.*, 
-                m.full_name as member_name,
+                u.full_name as member_name,
                 m.member_number
              FROM contributions c
              JOIN members m ON m.id = c.member_id
@@ -258,7 +259,7 @@ const exportContributions = async (req, res) => {
         const result = await (0, database_1.query)(`
             SELECT 
                 c.transaction_ref as "Transaction Ref",
-                m.full_name as "Member Name",
+                u.full_name as "Member Name",
                 m.member_number as "Member Number",
                 c.amount as "Amount",
                 c.payment_method as "Payment Method",
@@ -326,7 +327,7 @@ const reconcileContributions = async (req, res) => {
             WHERE 1=1 ${filter}
         `, params);
         const details = await (0, database_1.query)(`
-            SELECT c.*, m.member_number, m.full_name as member_name
+            SELECT c.*, m.member_number, u.full_name as member_name
             FROM contributions c
             JOIN members m ON m.id = c.member_id
             WHERE 1=1 ${filter}
